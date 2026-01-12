@@ -1,310 +1,235 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>キャラカード & HP管理（装備切替）</title>
-  <style>
-    :root{
-      --bg:#0f0f12; --panel:#171a20; --line:#2a2f3a; --txt:#e9ecf1;
-      --muted:#aab3c2; --red:#ef4444; --blue:#3b82f6; --btn:#222734;
-      --gold:#eab308;
-    }
-    body{margin:0;background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,sans-serif;}
-    header{
-      position:sticky;top:0;background:rgba(15,15,18,.92);backdrop-filter:blur(8px);
-      border-bottom:1px solid var(--line);padding:10px 12px;z-index:10;
-    }
-    .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:space-between;}
-    .pill{padding:6px 10px;border-radius:999px;border:1px solid var(--line);background:var(--panel);font-size:12px;color:var(--muted);}
-    select,button,input{font:inherit}
-    select,button{border:1px solid var(--line);background:var(--btn);color:var(--txt);border-radius:10px;padding:10px 12px;}
-    button{cursor:pointer}
-    button:active{transform:translateY(1px)}
-    .danger{border-color:#7f1d1d;background:#2a1212}
-    .primary{border-color:#1e3a8a;background:#101b33}
-    .equipOn{border-color:rgba(234,179,8,.55);background:rgba(234,179,8,.12)}
-    main{padding:12px;display:grid;grid-template-columns:repeat(1,minmax(0,1fr));gap:12px;}
-    @media(min-width:720px){ main{grid-template-columns:repeat(2,minmax(0,1fr));} }
-    .card{border:1px solid var(--line);background:var(--panel);border-radius:14px;padding:12px;}
-    .equipped{box-shadow:0 0 0 2px rgba(234,179,8,.55) inset;}
-    .top{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;}
-    .name{font-size:18px;font-weight:800;margin:0}
-    .sub{font-size:12px;color:var(--muted);margin-top:4px}
-    .tag{font-size:11px;padding:2px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted);display:inline-block;}
-    .tagGold{border-color:rgba(234,179,8,.55);color:rgba(255,231,140,.95);background:rgba(234,179,8,.10);}
-    .teamR{border-color:rgba(239,68,68,.35)}
-    .teamB{border-color:rgba(59,130,246,.35)}
-    .statgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:10px;}
-    .stat{border:1px solid var(--line);border-radius:12px;padding:8px;background:#12141a;}
-    .k{font-size:11px;color:var(--muted)}
-    .v{font-size:18px;font-weight:800;margin-top:2px}
-    .hpbox{
-      margin-top:10px;border:1px solid var(--line);border-radius:12px;padding:10px;
-      background:#12141a;display:flex;align-items:center;justify-content:space-between;gap:10px;
-    }
-    .hpLabel{font-size:12px;color:var(--muted)}
-    .hpVal{font-size:28px;font-weight:900}
-    .hpBtns{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;}
-    .hpBtns button{min-width:54px}
-    .actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:space-between;margin-top:10px;}
-    .small{font-size:11px;color:var(--muted)}
-    .diff{font-size:12px;color:var(--muted);margin-top:8px;line-height:1.4}
-    .diff b{color:#fff}
-  </style>
+<meta charset="UTF-8">
+<title>16x16 Board Game</title>
+<style>
+  body { margin:0; background:#111; color:#eee; font-family: system-ui; }
+  canvas { display:block; margin:20px auto; background:#fff; border-radius:12px; }
+</style>
 </head>
 <body>
-<header>
-  <div class="row">
-    <div class="row" style="gap:8px;">
-      <div class="pill">スマホ用：5キャラHP管理</div>
-      <div class="pill" id="hint">装備OFF(BASE)→宝箱ゲットで装備ON(GEAR)</div>
-    </div>
-    <div class="row">
-      <label class="pill">
-        チーム：
-        <select id="teamSel">
-          <option value="R">赤</option>
-          <option value="B">青</option>
-        </select>
-      </label>
-      <button id="resetHpBtn" class="danger">HPを最大に</button>
-      <button id="resetAllBtn">全部初期化</button>
-    </div>
-  </div>
-</header>
 
-<main id="cards"></main>
+<canvas id="game" width="720" height="720"></canvas>
 
 <script>
-/**
- * 目的：
- * - 装備前(BASE)でスタート
- * - 宝箱を取ったら「装備ボタン」で装備ON
- * - 装備ONでステータスがGEARに切り替わる
- *
- * 保存：
- * - HP と 装備状態(equipped) は端末内(localStorage)に保存
- */
+/* ================= 基本 ================= */
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+const SIZE = 16;
+const CELL = 40;
+const W = canvas.width;
+const H = canvas.height;
 
-const DATA = {
-  R: [
-    { key:"rabbit_hero", name:"うさぎ勇者",  role:"勇者",
-      BASE:{ HP:2, ATK:1, DEF:1, MOV:3 },  // 装備なし（弱い）
-      GEAR:{ HP:6, ATK:3, DEF:3, MOV:3 }   // 装備あり（今の強い数値）
-    },
-    { key:"pig_tank", name:"ぶた盾兵", role:"盾兵",
-      BASE:{ HP:2, ATK:1, DEF:1, MOV:2 },
-      GEAR:{ HP:5, ATK:2, DEF:4, MOV:2 }
-    },
-    { key:"snake_arch", name:"へび弓兵", role:"弓兵",
-      BASE:{ HP:2, ATK:1, DEF:1, MOV:2 },
-      GEAR:{ HP:5, ATK:2, DEF:2, MOV:4 }
-    },
-    { key:"ele_mage", name:"ぞう魔法使い", role:"魔法",
-      BASE:{ HP:2, ATK:1, DEF:1, MOV:2 },
-      GEAR:{ HP:5, ATK:3, DEF:2, MOV:3 }
-    },
-    { key:"lion_axe", name:"らいおん斧兵", role:"斧兵",
-      BASE:{ HP:2, ATK:1, DEF:1, MOV:3 },
-      GEAR:{ HP:5, ATK:4, DEF:1, MOV:2 }
-    },
-  ],
-  B: [
-    { key:"dog_hero", name:"犬勇者", role:"勇者",
-      BASE:{ HP:2, ATK:1, DEF:1, MOV:2 },
-      GEAR:{ HP:6, ATK:3, DEF:3, MOV:3 }
-    },
-    { key:"gira_tank", name:"きりん盾兵", role:"盾兵",
-      BASE:{ HP:2, ATK:1, DEF:1, MOV:2 },
-      GEAR:{ HP:5, ATK:2, DEF:4, MOV:2 }
-    },
-    { key:"dragon_arch", name:"龍弓兵", role:"弓兵",
-      BASE:{ HP:2, ATK:1, DEF:1, MOV:3 },
-      GEAR:{ HP:5, ATK:2, DEF:2, MOV:4 }
-    },
-    { key:"cow_mage", name:"牛魔法使い", role:"魔法",
-      BASE:{ HP:2, ATK:1, DEF:1, MOV:2 },
-      GEAR:{ HP:5, ATK:3, DEF:2, MOV:3 }
-    },
-    { key:"horse_axe", name:"うま斧兵", role:"斧兵",
-      BASE:{ HP:2, ATK:1, DEF:1, MOV:3 },
-      GEAR:{ HP:5, ATK:4, DEF:1, MOV:2 }
-    },
-  ]
+/* ================= サイコロ ================= */
+let diceView = {
+  atk: { value: 1 },
+  def: { value: 1 },
+  until: 0,
+  rolling: false
 };
 
-const teamSel = document.getElementById("teamSel");
-const cardsEl = document.getElementById("cards");
-const resetHpBtn = document.getElementById("resetHpBtn");
-const resetAllBtn = document.getElementById("resetAllBtn");
-
-/* ===== 保存キー ===== */
-function hpKey(team, charKey){ return `cm_board_hp_${team}_${charKey}`; }
-function eqKey(team, charKey){ return `cm_board_eq_${team}_${charKey}`; }
-
-/* ===== 装備状態 ===== */
-function isEquipped(team, c){
-  return localStorage.getItem(eqKey(team, c.key)) === "1";
-}
-function setEquipped(team, c, v){
-  localStorage.setItem(eqKey(team, c.key), v ? "1" : "0");
+function rollD6(){
+  return Math.floor(Math.random()*6)+1;
 }
 
-/* ===== 現在ステータス ===== */
-function curStats(team, c){
-  return isEquipped(team, c) ? c.GEAR : c.BASE;
+/* ================= 地形 ================= */
+const terrain = Array.from({length: SIZE}, (_,y)=>
+  Array.from({length: SIZE}, (_,x)=>{
+    if (y===7 || y===8) return "river";
+    if ((x<2&&y<2)||(x>13&&y<2)||(x<2&&y>13)||(x>13&&y>13)) return "forest";
+    return "plain";
+  })
+);
+terrain[7][8] = "bridge";
+terrain[8][8] = "bridge";
+
+/* ================= キャラ ================= */
+const units = [
+  // BLUE
+  {id:1,team:"B",name:"犬勇者",role:"hero",x:4,y:2,hp:7,ATK:2,DEF:3,MOV:3},
+  {id:2,team:"B",name:"きりん盾兵",role:"tank",x:6,y:2,hp:8,ATK:1,DEF:5,MOV:3},
+  {id:3,team:"B",name:"龍弓兵",role:"archer",x:8,y:2,hp:6,ATK:4,DEF:1,MOV:2,rangeLen:4},
+  {id:4,team:"B",name:"牛魔法使い",role:"mage",x:5,y:3,hp:8,ATK:2,DEF:3,MOV:2},
+  {id:5,team:"B",name:"うま斧兵",role:"axe",x:7,y:3,hp:7,ATK:3,DEF:1,MOV:4},
+
+  // RED
+  {id:6,team:"R",name:"うさぎ勇者",role:"hero",x:4,y:13,hp:7,ATK:2,DEF:2,MOV:4},
+  {id:7,team:"R",name:"ぶた盾兵",role:"tank",x:6,y:13,hp:9,ATK:1,DEF:5,MOV:2},
+  {id:8,team:"R",name:"へび弓兵",role:"archer",x:8,y:13,hp:6,ATK:3,DEF:1,MOV:3,rangeLen:3},
+  {id:9,team:"R",name:"ぞう魔法使い",role:"mage",x:5,y:12,hp:8,ATK:3,DEF:2,MOV:2},
+  {id:10,team:"R",name:"らいおん斧兵",role:"axe",x:7,y:12,hp:7,ATK:4,DEF:1,MOV:3},
+];
+
+/* ================= 状態 ================= */
+let turn = "R";
+let phase = "move";
+let selected = null;
+let highlights = [];
+let pulse = 0;
+
+/* ================= 補助 ================= */
+function unitAt(x,y){
+  return units.find(u=>u.hp>0 && u.x===x && u.y===y);
+}
+function inBoard(x,y){
+  return x>=0 && y>=0 && x<SIZE && y<SIZE;
+}
+function walkable(x,y){
+  if (!inBoard(x,y)) return false;
+  if (terrain[y][x]==="river") return false;
+  if (unitAt(x,y)) return false;
+  return true;
 }
 
-/* ===== HP ===== */
-function getHp(team, c){
-  const stats = curStats(team, c);
-  const v = localStorage.getItem(hpKey(team, c.key));
-  if (v === null) return stats.HP;
-  const n = Number(v);
-  if (!Number.isFinite(n)) return stats.HP;
-  // 最大HPが装備で変わるので、はみ出したら丸める
-  return clampHp(stats.HP, n);
-}
-function setHp(team, c, hp){
-  localStorage.setItem(hpKey(team, c.key), String(hp));
-}
-function clampHp(maxHp, hp){
-  if (hp < 0) hp = 0;
-  if (hp > maxHp) hp = maxHp;
-  return hp;
-}
-
-/* ===== 表示 ===== */
-function diffText(base, gear){
-  const f = (k) => {
-    const b = base[k], g = gear[k];
-    const d = g - b;
-    if (d === 0) return `${k}: ${b} → ${g}`;
-    const sign = d>0 ? "+" : "";
-    return `${k}: ${b} → ${g}（${sign}${d}）`;
-  };
-  return `${f("HP")} / ${f("ATK")} / ${f("DEF")} / ${f("MOV")}`;
-}
-
-function render(){
-  const team = teamSel.value;
-  const list = DATA[team];
-  cardsEl.innerHTML = "";
-
-  for (const c of list){
-    const equipped = isEquipped(team, c);
-    const stats = curStats(team, c);
-    const hp = getHp(team, c);
-
-    const card = document.createElement("div");
-    card.className = `card ${team==="R"?"teamR":"teamB"} ${equipped?"equipped":""}`;
-
-    const teamName = team==="R" ? "赤" : "青";
-    const eqTag = equipped ? `<span class="tag tagGold">装備中</span>` : `<span class="tag">装備なし</span>`;
-
-    card.innerHTML = `
-      <div class="top">
-        <div>
-          <p class="name">${c.name}</p>
-          <div class="sub">${teamName}チーム / <span class="tag">${c.role}</span> ${eqTag}</div>
-        </div>
-        <div class="small">最大HP ${stats.HP}</div>
-      </div>
-
-      <div class="statgrid">
-        <div class="stat"><div class="k">ATK</div><div class="v">${stats.ATK}</div></div>
-        <div class="stat"><div class="k">DEF</div><div class="v">${stats.DEF}</div></div>
-        <div class="stat"><div class="k">MOV</div><div class="v">${stats.MOV}</div></div>
-        <div class="stat"><div class="k">状態</div><div class="v" style="font-size:14px">${equipped ? "装備あり" : "装備なし"}</div></div>
-      </div>
-
-      <div class="hpbox">
-        <div>
-          <div class="hpLabel">残りHP</div>
-          <div class="hpVal" id="hp_${team}_${c.key}">${hp}</div>
-        </div>
-        <div class="hpBtns">
-          <button data-delta="-5">-5</button>
-          <button data-delta="-1">-1</button>
-          <button data-delta="+1">+1</button>
-          <button data-delta="+5">+5</button>
-        </div>
-      </div>
-
-      <div class="actions">
-        <button class="primary equipBtn ${equipped?"equipOn":""}">
-          ${equipped ? "装備を外す（BASEへ）" : "装備する（GEARへ）"}
-        </button>
-        <button class="danger healBtn">HPを最大に</button>
-      </div>
-
-      <div class="diff">
-        <b>装備差分</b><br>
-        ${diffText(c.BASE, c.GEAR)}
-      </div>
-    `;
-
-    // HPボタン
-    card.querySelectorAll("button[data-delta]").forEach(btn=>{
-      btn.addEventListener("click", ()=>{
-        const delta = Number(btn.getAttribute("data-delta"));
-        const cur = getHp(team, c);
-        const next = clampHp(stats.HP, cur + delta);
-        setHp(team, c, next);
-        document.getElementById(`hp_${team}_${c.key}`).textContent = String(next);
-      });
-    });
-
-    // 装備切替ボタン
-    card.querySelector(".equipBtn").addEventListener("click", ()=>{
-      const now = isEquipped(team, c);
-      setEquipped(team, c, !now);
-
-      // 装備切替で最大HPが変わるので、HPを新最大に丸める（＆基本は最大に合わせる）
-      const newStats = curStats(team, c);
-      // 「宝箱取ったら全回復」にしたいならこれが自然
-      setHp(team, c, newStats.HP);
-
-      render();
-    });
-
-    // このキャラだけHP最大
-    card.querySelector(".healBtn").addEventListener("click", ()=>{
-      const s = curStats(team, c);
-      setHp(team, c, s.HP);
-      render();
-    });
-
-    cardsEl.appendChild(card);
-  }
-}
-
-teamSel.addEventListener("change", render);
-
-// チーム全員 HP 最大（現状態の最大HPへ）
-resetHpBtn.addEventListener("click", ()=>{
-  const team = teamSel.value;
-  for (const c of DATA[team]){
-    const s = curStats(team, c);
-    setHp(team, c, s.HP);
-  }
-  render();
-});
-
-// 端末内の保存を全部消す（HPも装備状態も）
-resetAllBtn.addEventListener("click", ()=>{
-  for (const team of ["R","B"]){
-    for (const c of DATA[team]){
-      localStorage.removeItem(hpKey(team, c.key));
-      localStorage.removeItem(eqKey(team, c.key));
+/* ================= 移動 ================= */
+function calcMove(u){
+  highlights=[];
+  for(let dy=-u.MOV;dy<=u.MOV;dy++){
+    for(let dx=-u.MOV;dx<=u.MOV;dx++){
+      if(Math.abs(dx)+Math.abs(dy)<=u.MOV){
+        const nx=u.x+dx, ny=u.y+dy;
+        if(walkable(nx,ny)) highlights.push({x:nx,y:ny,type:"move"});
+      }
     }
   }
-  render();
-});
+}
 
-// 初回表示
-render();
+/* ================= 攻撃範囲 ================= */
+function calcAttack(u){
+  highlights=[];
+  const dir = (u.team==="R")?-1:1;
+  const add=(x,y)=>{if(inBoard(x,y)) highlights.push({x,y,type:"attack"});};
+
+  if(u.role==="hero"){
+    add(u.x,u.y-1);add(u.x+1,u.y);add(u.x-1,u.y);add(u.x,u.y+1);
+  }
+  if(u.role==="tank"){
+    add(u.x,u.y+dir);add(u.x-1,u.y);add(u.x+1,u.y);
+  }
+  if(u.role==="axe"){
+    add(u.x-1,u.y+dir);add(u.x,u.y+dir);add(u.x+1,u.y+dir);
+  }
+  if(u.role==="mage"){
+    add(u.x,u.y-1);add(u.x+1,u.y);add(u.x-1,u.y);add(u.x,u.y+1);
+  }
+  if(u.role==="archer"){
+    const len=u.rangeLen||3;
+    for(let i=1;i<=len;i++){
+      const y=u.y+dir*i;
+      if(!inBoard(u.x,y)) break;
+      add(u.x,y);
+    }
+  }
+}
+
+/* ================= 攻撃処理（2サイコロ） ================= */
+function attack(attacker, defender){
+  const rA = rollD6();
+  const rD = rollD6();
+
+  diceView.rolling = true;
+  diceView.until = Date.now()+700;
+  diceView.atk.value = rA;
+  diceView.def.value = rD;
+
+  let dmg = (rA+attacker.ATK) - (rD+defender.DEF);
+  if(dmg<1) dmg=1;
+  defender.hp = Math.max(0, defender.hp-dmg);
+}
+
+/* ================= クリック ================= */
+canvas.onclick = e=>{
+  const r=canvas.getBoundingClientRect();
+  const x=Math.floor((e.clientX-r.left)/CELL);
+  const y=Math.floor((e.clientY-r.top)/CELL);
+
+  const hit=highlights.find(h=>h.x===x&&h.y===y);
+  if(selected && hit){
+    if(phase==="move"){
+      selected.x=x;selected.y=y;
+      phase="attack";calcAttack(selected);return;
+    }
+    if(phase==="attack"){
+      const t=unitAt(x,y);
+      if(t && t.team!==selected.team){
+        attack(selected,t);
+        selected=null;highlights=[];phase="move";
+        turn=(turn==="R")?"B":"R";
+        return;
+      }
+    }
+  }
+
+  const u=unitAt(x,y);
+  if(u && u.team===turn){
+    selected=u;phase="move";calcMove(u);
+  }
+};
+
+/* ================= 描画 ================= */
+function draw(){
+  pulse+=0.05;
+  ctx.clearRect(0,0,W,H);
+
+  for(let y=0;y<SIZE;y++)for(let x=0;x<SIZE;x++){
+    ctx.fillStyle=
+      terrain[y][x]==="plain"?"#cde8b5":
+      terrain[y][x]==="forest"?"#4f7f3a":
+      terrain[y][x]==="bridge"?"#c9a46a":"#2f93d1";
+    ctx.fillRect(x*CELL,y*CELL,CELL,CELL);
+    ctx.strokeRect(x*CELL,y*CELL,CELL,CELL);
+  }
+
+  highlights.forEach(h=>{
+    ctx.fillStyle=h.type==="move"
+      ?`rgba(34,197,94,${0.25+Math.sin(pulse)*0.1})`
+      :`rgba(239,68,68,${0.25+Math.sin(pulse)*0.1})`;
+    ctx.fillRect(h.x*CELL,h.y*CELL,CELL,CELL);
+  });
+
+  units.forEach(u=>{
+    if(u.hp<=0)return;
+    ctx.fillStyle=u.team==="R"?"#ef4444":"#3b82f6";
+    ctx.beginPath();
+    ctx.arc(u.x*CELL+20,u.y*CELL+20,14,0,Math.PI*2);
+    ctx.fill();
+    ctx.fillStyle="#000";
+    ctx.fillText(u.hp,u.x*CELL+20,u.y*CELL+20);
+  });
+
+  // サイコロ
+  if(diceView.rolling || Date.now()<diceView.until){
+    if(Date.now()<diceView.until){
+      diceView.atk.value=rollD6();
+      diceView.def.value=rollD6();
+    }else diceView.rolling=false;
+
+    const size=70;
+    const y=H/2-size/2;
+    const x1=W/2-size-20;
+    const x2=W/2+20;
+
+    ctx.fillStyle="#fff";
+    ctx.strokeStyle="#b91c1c";
+    ctx.lineWidth=4;
+    ctx.fillRect(x1,y,size,size);
+    ctx.strokeRect(x1,y,size,size);
+    ctx.fillStyle="#b91c1c";
+    ctx.font="bold 32px system-ui";
+    ctx.fillText(diceView.atk.value,x1+size/2,y+size/2);
+
+    ctx.strokeStyle="#1e3a8a";
+    ctx.fillStyle="#fff";
+    ctx.fillRect(x2,y,size,size);
+    ctx.strokeRect(x2,y,size,size);
+    ctx.fillStyle="#1e3a8a";
+    ctx.fillText(diceView.def.value,x2+size/2,y+size/2);
+  }
+
+  requestAnimationFrame(draw);
+}
+draw();
 </script>
 </body>
 </html>
